@@ -54,7 +54,7 @@ class Board:
                 if (x, y) == (self.goal_x, self.goal_y):
                     continue
 
-                if y == half - 1
+                if y == half - 1:
                     continue
 
                 self.tiles[x][y].set_blocked(random.random() < wall_chance)
