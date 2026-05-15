@@ -130,10 +130,10 @@ class Board:
         candidates = self._get_outer_layer_candidates(snake_length)
         if from_upper:
             candidates = [cell for cell in candidates if cell[1] < self.goal_y]
-            candidates.sort(key=lambda cell: self._distance_to_goal(*cell))
         else:
             candidates = [cell for cell in candidates if cell[1] > self.goal_y]
-            candidates.sort(key=lambda cell: self._distance_to_goal(*cell), reverse=True)
+
+        candidates.sort(key=lambda cell: self._distance_to_goal(*cell))
 
         if not candidates:
             return self.size_x // 2, 0 if from_upper else self.size_y - 1
@@ -215,16 +215,24 @@ class Board:
 
 
     def spawn_snakes(self, snake_length: int = 4) -> Tuple[Snake, Snake]:
-        comp_start_x, comp_start_y = self._carve_path_to_goal(
-            from_upper=True,
-            snake_length=snake_length,
-        )
-        comp_direction = self._get_outer_layer_direction(comp_start_x, comp_start_y)
+        if not self._check_path_from_half(upper=True):
+            self._carve_path_to_goal(from_upper=True, snake_length=snake_length)
+        if not self._check_path_from_half(upper=False):
+            self._carve_path_to_goal(from_upper=False, snake_length=snake_length)
 
-        player_start_x, player_start_y = self._carve_path_to_goal(
-            from_upper=False,
-            snake_length=snake_length,
+        half = self.size_y // 2
+        comp_start_x, comp_start_y = self._pick_spawn(
+            x_range=range(self.size_x),
+            y_range=range(0, half - 1),       # upper half, away from goal row
+            snake_length=snake_length
         )
+        player_start_x, player_start_y = self._pick_spawn(
+            x_range=range(self.size_x),
+            y_range=range(half + 1, self.size_y),  # lower half, away from goal row
+            snake_length=snake_length
+        )
+
+        comp_direction = self._get_outer_layer_direction(comp_start_x, comp_start_y)
         player_direction = self._get_outer_layer_direction(player_start_x, player_start_y)
 
         self.clear_spawn_area(comp_start_x, comp_start_y, snake_length, comp_direction)
@@ -250,6 +258,35 @@ class Board:
         self.player_snake.mark_tiles(self)
 
         return self.player_snake, self.computer_snake
+
+    def _pick_spawn(self, x_range: range, y_range: range, snake_length: int) -> Tuple[int, int]:
+        candidates = []
+        for y in y_range:
+            for x in x_range:
+                tile = self.tiles[x][y]
+                if not tile.check_blocked() and tile.check_occupant() is None and not tile.check_is_goal():
+                    candidates.append((x, y))
+
+        # shuffle so spawn is not deterministic
+        random.shuffle(candidates)
+
+        # pick a candidate that has enough room behind it for the full body
+        for x, y in candidates:
+            direction = self._get_outer_layer_direction(x, y)
+            dx, dy = direction
+            body_cells = [(x - dx * i, y - dy * i) for i in range(snake_length)]
+            if all(
+                0 <= bx < self.size_x
+                and 0 <= by < self.size_y
+                and not self.tiles[bx][by].check_blocked()
+                for bx, by in body_cells
+            ):
+                return x, y
+
+        # fallback: centre of the half
+        mid_x = self.size_x // 2
+        mid_y = (y_range.start + y_range.stop) // 2
+        return mid_x, mid_y
 
     def _get_outer_layer_direction(self, x: int, y: int) -> Tuple[int, int]:
         if y == 0 or y == self.size_y - 1:
