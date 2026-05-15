@@ -66,25 +66,6 @@ class Board:
         if not self._check_path_from_half(upper=False):
             self._carve_path_to_goal(from_upper=False)
 
-        # split the maze into layers 
-        # for y in range(self.size_y):
-        #     for x in range(self.size_x):
-        #         if self.tiles[x][y].is_goal:
-        #             continue
-        #         layer = min(x, y, self.size_x - 1 - x, self.size_y - 1 - y)
-        #       
-        #         is_blocked = False
-        #         # odd layers has a higher chance of being a wall
-        #         if layer == 0: continue
-        #         elif layer % 2 != 0 and random.random() < wall_chance:
-        #             is_blocked = True
-        #         elif layer % 2 == 0 and random.random() > wall_chance:
-        #             is_blocked = True
-        #
-        #         self.tiles[x][y].set_blocked(is_blocked)
-        #
-        # if not self.check_valid_path_exist():
-        #     self.create_path()
     def _check_path_from_half(self, upper: bool) -> bool:
         # BFS from every free edge cell in one half to see if the goal is reachable
         half = self.size_y // 2
