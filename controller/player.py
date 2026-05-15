@@ -5,20 +5,21 @@ if TYPE_CHECKING:
     from model.snake import Snake
 
 class PlayerController:
-    MAX_MOVES: int = 3
-    MAX_OBSTACLES: int = 6
+    def __init__(self, board: "Board", max_actions: int = 3) -> None:
+        if max_actions < 1:
+            raise ValueError("max_actions must be at least 1")
 
-    def __init__(self, board: "Board") -> None:
         self.board = board
-        self.moves_remaining: int = self.MAX_MOVES
+        self.max_actions = max_actions
+        self.actions_remaining: int = max_actions
         self._obstacle_cells: Set[Tuple[int, int]] = set()
 
     # round management
-    def reset_moves(self) -> None:
-        self.moves_remaining = self.MAX_MOVES
+    def reset_actions(self) -> None:
+        self.actions_remaining = self.max_actions
 
     def skip_remaining(self) -> None:
-        self.moves_remaining = 0
+        self.actions_remaining = 0
 
     # validation helpers
     def can_place(
@@ -28,9 +29,7 @@ class PlayerController:
         player_snake: "Snake",
         ai_snake: "Snake",
     ) -> bool:
-        if self.moves_remaining <= 0:
-            return False
-        if len(self._obstacle_cells) >= self.MAX_OBSTACLES:
+        if self.actions_remaining <= 0:
             return False
         if not (0 <= x < self.board.size_x and 0 <= y < self.board.size_y):
             return False
@@ -40,6 +39,8 @@ class PlayerController:
             return False
         if tile.check_is_goal():
             return False
+        if self.board.is_goal_protected_zone(x, y):
+            return False
         if player_snake.occupies(x, y):
             return False
         if ai_snake.occupies(x, y):
@@ -48,12 +49,16 @@ class PlayerController:
         return True
 
     def can_destroy(self, x: int, y: int) -> bool:
-        if self.moves_remaining <= 0:
+        if self.actions_remaining <= 0:
             return False
-        return (x, y) in self._obstacle_cells
+        if not (0 <= x < self.board.size_x and 0 <= y < self.board.size_y):
+            return False
 
-    def has_moves(self) -> bool:
-        return self.moves_remaining > 0
+        tile = self.board.tiles[x][y]
+        return tile.check_blocked()
+
+    def has_actions(self) -> bool:
+        return self.actions_remaining > 0
 
     # actions
     def place_obstacle(
@@ -66,18 +71,22 @@ class PlayerController:
         if not self.can_place(x, y, player_snake, ai_snake):
             return False
 
-        self.board.tiles[x][y].set_blocked(True)
+        if not self.board.add_obstacle(x, y):
+            return False
+
         self._obstacle_cells.add((x, y))
-        self.moves_remaining -= 1
+        self.actions_remaining -= 1
         return True
 
     def destroy_obstacle(self, x: int, y: int) -> bool:
         if not self.can_destroy(x, y):
             return False
 
-        self.board.tiles[x][y].set_blocked(False)
+        if not self.board.remove_obstacle(x, y):
+            return False
+
         self._obstacle_cells.discard((x, y))
-        self.moves_remaining -= 1
+        self.actions_remaining -= 1
         return True
 
     def toggle_obstacle(
@@ -87,15 +96,19 @@ class PlayerController:
         player_snake: "Snake",
         ai_snake: "Snake",
     ) -> bool:
-        if (x, y) in self._obstacle_cells:
+        if self.actions_remaining <= 0:
+            return False
+
+        tile = self.board.tiles[x][y]
+        if tile.check_blocked():
             return self.destroy_obstacle(x, y)
-        else:
-            return self.place_obstacle(x, y, player_snake, ai_snake)
+
+        return self.place_obstacle(x, y, player_snake, ai_snake)
 
     # reset rounds
     def clear_all_obstacles(self) -> None:
         for x, y in list(self._obstacle_cells):
-            self.board.tiles[x][y].set_blocked(False)
+            self.board.remove_obstacle(x, y)
         self._obstacle_cells.clear()
 
     @property
@@ -113,6 +126,6 @@ class PlayerController:
     def __repr__(self) -> str:
         return (
             f"PlayerController("
-            f"moves_remaining={self.moves_remaining}/{self.MAX_MOVES}, "
-            f"obstacles={self.obstacle_count}/{self.MAX_OBSTACLES})"
+            f"actions_remaining={self.actions_remaining}/{self.max_actions}, "
+            f"obstacles={self.obstacle_count})"
         )

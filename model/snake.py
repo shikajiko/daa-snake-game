@@ -95,7 +95,7 @@ class Snake:
     
     def mark_tiles(self, board) -> None:
         for x, y in self.body:
-            board.tiles[x][y].set_occupant(None)
+            board.tiles[x][y].set_occupant(self.owner)
 
 
     def kill(self) -> None:

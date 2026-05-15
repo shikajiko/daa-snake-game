@@ -59,13 +59,6 @@ class Board:
 
                 self.tiles[x][y].set_blocked(random.random() < wall_chance)
 
-
-        if not self._check_path_from_half(upper=True):
-            self._carve_path_to_goal(from_upper=True)
-        
-        if not self._check_path_from_half(upper=False):
-            self._carve_path_to_goal(from_upper=False)
-
     def _check_path_from_half(self, upper: bool) -> bool:
         # BFS from every free edge cell in one half to see if the goal is reachable
         half = self.size_y // 2
@@ -106,8 +99,21 @@ class Board:
 
         return False
 
-    def _carve_path_to_goal(self, from_upper: bool) -> None:
-        x, y = self.ideal_x, self.ideal_y
+    def _carve_path_to_goal(self, from_upper: bool, snake_length: int = 4) -> Tuple[int, int]:
+        start_x, start_y = self._get_path_start(from_upper, snake_length)
+        x, y = start_x, start_y
+
+        if y == 0 or y == self.size_y - 1:
+            while y != self.goal_y:
+                self.tiles[x][y].set_blocked(False)
+                y += 1 if y < self.goal_y else -1
+
+            while x != self.goal_x:
+                self.tiles[x][y].set_blocked(False)
+                x += 1 if x < self.goal_x else -1
+
+            self.tiles[self.goal_x][self.goal_y].set_blocked(False)
+            return start_x, start_y
 
         while x != self.goal_x:
             self.tiles[x][y].set_blocked(False)
@@ -118,6 +124,35 @@ class Board:
             y += 1 if y < self.goal_y else -1
 
         self.tiles[self.goal_x][self.goal_y].set_blocked(False)
+        return start_x, start_y
+
+    def _get_path_start(self, from_upper: bool, snake_length: int) -> Tuple[int, int]:
+        candidates = self._get_outer_layer_candidates(snake_length)
+        if from_upper:
+            candidates = [cell for cell in candidates if cell[1] < self.goal_y]
+            candidates.sort(key=lambda cell: self._distance_to_goal(*cell))
+        else:
+            candidates = [cell for cell in candidates if cell[1] > self.goal_y]
+            candidates.sort(key=lambda cell: self._distance_to_goal(*cell), reverse=True)
+
+        if not candidates:
+            return self.size_x // 2, 0 if from_upper else self.size_y - 1
+
+        return candidates[0]
+
+    def _get_outer_layer_candidates(self, snake_length: int) -> List[Tuple[int, int]]:
+        candidates: List[Tuple[int, int]] = []
+        min_axis = snake_length - 1
+
+        for x in range(min_axis, self.size_x):
+            candidates.append((x, 0))
+            candidates.append((x, self.size_y - 1))
+
+        for y in range(min_axis, self.size_y):
+            candidates.append((0, y))
+            candidates.append((self.size_x - 1, y))
+
+        return candidates
 
     def check_valid_path_exist(self):
         # bfs traversal to check at least one valid path
@@ -180,16 +215,17 @@ class Board:
 
 
     def spawn_snakes(self, snake_length: int = 4) -> Tuple[Snake, Snake]:
-        half = self.size_y // 2
-        mid_x = self.size_x // 2
+        comp_start_x, comp_start_y = self._carve_path_to_goal(
+            from_upper=True,
+            snake_length=snake_length,
+        )
+        comp_direction = self._get_outer_layer_direction(comp_start_x, comp_start_y)
 
-        comp_start_x = mid_x
-        comp_start_y = snake_length -1 
-        comp_direction = (0, 1) # moving down
-
-        player_start_x = mid_x
-        player_start_y = self.size_y - snake_length
-        player_direction = (0, -1) # moving up
+        player_start_x, player_start_y = self._carve_path_to_goal(
+            from_upper=False,
+            snake_length=snake_length,
+        )
+        player_direction = self._get_outer_layer_direction(player_start_x, player_start_y)
 
         self.clear_spawn_area(comp_start_x, comp_start_y, snake_length, comp_direction)
         self.clear_spawn_area(player_start_x, player_start_y, snake_length, player_direction)
@@ -215,6 +251,13 @@ class Board:
 
         return self.player_snake, self.computer_snake
 
+    def _get_outer_layer_direction(self, x: int, y: int) -> Tuple[int, int]:
+        if y == 0 or y == self.size_y - 1:
+            return (1, 0)
+        return (0, 1)
+
+    def _distance_to_goal(self, x: int, y: int) -> int:
+        return abs(x - self.goal_x) + abs(y - self.goal_y)
 
     def clear_spawn_area(self, sx: int, sy: int, length: int, direction: Tuple[int, int]) -> None:
         dx, dy = direction
@@ -274,7 +317,7 @@ class Board:
             return False
         
         tile = self.tiles[x][y]
-        if tile.check_is_goal() or tile.check_blocked():
+        if tile.check_is_goal() or tile.check_blocked() or self.is_goal_protected_zone(x, y):
             return False
 
         if tile.check_occupant() is not None:
@@ -283,6 +326,10 @@ class Board:
         tile.set_blocked(True)
         self._notify_board_changed()
         return True
+
+    def is_goal_protected_zone(self, x: int, y: int) -> bool:
+        radius = max(1, min(self.size_x, self.size_y) // 10)
+        return abs(x - self.goal_x) + abs(y - self.goal_y) <= radius
 
     def remove_obstacle(self, x: int, y: int) -> bool: # true if the wall is successfully removed
         if not self._in_bounds(x, y):
@@ -303,12 +350,9 @@ class Board:
         return self.add_obstacle(x, y)
 
 
-    # invalidate previous Dijkstra paths for both snakes and fire the external callback, so the controller re-plan the path
+    # Fire the external callback so the controller can re-plan paths.
+    # Existing paths are kept until a new valid path is found.
     def _notify_board_changed(self) -> None:
-        if self.player_snake:
-            self.player_snake.clear_path()
-        if self.computer_snake:
-            self.computer_snake.clear_path()
         if callable(self.on_board_changed):
             self.on_board_changed()
 
